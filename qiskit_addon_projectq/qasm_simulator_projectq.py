@@ -19,10 +19,10 @@ import logging
 import warnings
 from collections import OrderedDict, Counter
 import numpy as np
-from qiskit._result import Result
 from qiskit.backends import BaseBackend
 from qiskit.backends.local.localjob import LocalJob
 from qiskit.backends.local._simulatorerror import SimulatorError
+from qiskit.result._utils import result_from_old_style_dict
 try:
     from projectq.backends._sim._cppsim import Simulator as CppSim
 except ImportError:
@@ -81,25 +81,25 @@ class QasmSimulatorProjectQ(BaseBackend):
         self._classical_state = 0
         self._seed = None
         self._shots = 0
-        self._sim = None
 
     def run(self, qobj):
         """Run qobj asynchronously.
 
         Args:
-            qobj (dict): job description
+            qobj (Qobj): Qobj structure
 
         Returns:
             LocalJob: derived from BaseJob
         """
-        return LocalJob(self._run_job, qobj)
+        local_job = LocalJob(self._run_job, qobj)
+        local_job.submit()
+        return local_job
 
     def _run_job(self, qobj):
         """Run circuits in qobj and return the result
 
             Args:
-                qobj (dict): all the information necessary
-                    (e.g., circuit, backend and resources) for running a circuit
+                qobj (Qobj): Qobj structure
 
             Returns:
                 Result: Result is a class including the information to be returned to users.
@@ -113,35 +113,33 @@ class QasmSimulatorProjectQ(BaseBackend):
                         'status': 'DONE'
                         }]
         """
-
         result_list = []
         self._validate(qobj)
-        self._sim = Simulator(gate_fusion=True)
-        if 'seed' in qobj['config']:
-            self._seed = qobj['config']['seed']
-            self._sim._simulator = CppSim(self._seed)
-        else:
-            self._seed = random.getrandbits(32)
-        self._shots = qobj['config']['shots']
+        self._seed = getattr(qobj.config, 'seed', random.getrandbits(32))
+        self._shots = qobj.config.shots
+        sim = Simulator(rnd_seed=self._seed, gate_fusion=True)
         start = time.time()
-        for circuit in qobj['circuits']:
-            result_list.append(self.run_circuit(circuit))
+        for circuit in qobj.experiments:
+            result_list.append(self.run_circuit(circuit, sim))
         end = time.time()
         job_id = str(uuid.uuid4())
-        result = {'backend': self._configuration['name'],
-                  'id': qobj['id'],
+        result = {'backend': self.name,
+                  'id': qobj.qobj_id,
                   'job_id': job_id,
                   'result': result_list,
                   'status': 'COMPLETED',
                   'success': True,
                   'time_taken': (end - start)}
-        return Result(result)
+        return result_from_old_style_dict(
+            result,
+            [circuit.header.name for circuit in qobj.experiments])
 
-    def run_circuit(self, circuit):
+    def run_circuit(self, circuit, sim):
         """Run a circuit and return a single Result.
 
         Args:
-            circuit (dict): JSON circuit from qobj circuits list
+            circuit (QobjExperiment): Qobj experiment
+            sim (Simulator): Simulator
 
         Returns:
             dict: A dictionary of results which looks something like::
@@ -158,25 +156,23 @@ class QasmSimulatorProjectQ(BaseBackend):
             SimulatorError: if an error occurred.
         """
         # pylint: disable=expression-not-assigned,pointless-statement
-        ccircuit = circuit['compiled_circuit']
-        self._number_of_qubits = ccircuit['header']['number_of_qubits']
-        self._number_of_clbits = ccircuit['header']['number_of_clbits']
+        self._number_of_qubits = circuit.header.number_of_qubits
+        self._number_of_clbits = circuit.header.number_of_clbits
         self._classical_state = 0
         cl_reg_index = []  # starting bit index of classical register
         cl_reg_nbits = []  # number of bits in classical register
         clbit_index = 0
-        qobj_quregs = OrderedDict(_get_register_specs(
-            ccircuit['header']['qubit_labels']))
-        eng = MainEngine(backend=self._sim)
-        for cl_reg in ccircuit['header']['clbit_labels']:
+        qobj_quregs = OrderedDict(_get_register_specs(circuit.header.qubit_labels))
+        eng = MainEngine(backend=sim)
+        for cl_reg in circuit.header.clbit_labels:
             cl_reg_nbits.append(cl_reg[1])
             cl_reg_index.append(clbit_index)
             clbit_index += cl_reg[1]
+
         # let circuit seed override qobj default
-        if 'config' in circuit:
-            if 'seed' in circuit['config']:
-                if circuit['config']['seed'] is not None:
-                    self._sim._simulator = CppSim(circuit['config']['seed'])
+        if getattr(circuit, 'config', None):
+            if getattr(circuit.config, 'seed', None):
+                sim._simulator = CppSim(circuit.config.seed)
         outcomes = []
         snapshots = {}
         projq_qureg_dict = OrderedDict(((key, eng.allocate_qureg(size))
@@ -200,79 +196,79 @@ class QasmSimulatorProjectQ(BaseBackend):
                 eng.backend.set_wavefunction(ground_state, qureg)
 
             # Do each operation in this shot
-            for operation in ccircuit['operations']:
-                if 'conditional' in operation:
-                    mask = int(operation['conditional']['mask'], 16)
+            for operation in circuit.instructions:
+                if getattr(operation, 'conditional', None):
+                    mask = int(operation.conditional.mask, 16)
                     if mask > 0:
                         value = self._classical_state & mask
                         while (mask & 0x1) == 0:
                             mask >>= 1
                             value >>= 1
-                        if value != int(operation['conditional']['val'], 16):
+                        if value != int(operation.conditional.val, 16):
                             continue
                 # Check if single  gate
-                if operation['name'] in ['U', 'u3']:
-                    params = operation['params']
-                    qubit = qureg[operation['qubits'][0]]
+                if operation.name in ('U', 'u3'):
+                    params = operation.params
+                    qubit = qureg[operation.qubits[0]]
                     Rz(params[2]) | qubit
                     Ry(params[0]) | qubit
                     Rz(params[1]) | qubit
-                elif operation['name'] in ['u1']:
-                    params = operation['params']
-                    qubit = qureg[operation['qubits'][0]]
+                elif operation.name == 'u1':
+                    params = operation.params
+                    qubit = qureg[operation.qubits[0]]
                     Rz(params[0]) | qubit
-                elif operation['name'] in ['u2']:
-                    params = operation['params']
-                    qubit = qureg[operation['qubits'][0]]
+                elif operation.name == 'u2':
+                    params = operation.params
+                    qubit = qureg[operation.qubits[0]]
                     Rz(params[1] - np.pi/2) | qubit
                     Rx(np.pi/2) | qubit
                     Rz(params[0] + np.pi/2) | qubit
-                elif operation['name'] == 't':
-                    qubit = qureg[operation['qubits'][0]]
+                elif operation.name == 't':
+                    qubit = qureg[operation.qubits[0]]
                     T | qubit
-                elif operation['name'] == 'h':
-                    qubit = qureg[operation['qubits'][0]]
+                elif operation.name == 'h':
+                    qubit = qureg[operation.qubits[0]]
                     H | qubit
-                elif operation['name'] == 's':
-                    qubit = qureg[operation['qubits'][0]]
+                elif operation.name == 's':
+                    qubit = qureg[operation.qubits[0]]
                     S | qubit
-                elif operation['name'] in ['CX', 'cx']:
-                    qubit0 = qureg[operation['qubits'][0]]
-                    qubit1 = qureg[operation['qubits'][1]]
+                elif operation.name in ('CX', 'cx'):
+                    qubit0 = qureg[operation.qubits[0]]
+                    qubit1 = qureg[operation.qubits[1]]
                     CX | (qubit0, qubit1)
-                elif operation['name'] in ['id', 'u0']:
+                elif operation.name in ('id', 'u0'):
                     pass
                 # Check if measure
-                elif operation['name'] == 'measure':
-                    qubit_index = operation['qubits'][0]
+                elif operation.name == 'measure':
+                    qubit_index = operation.qubits[0]
                     qubit = qureg[qubit_index]
-                    clbit = operation['clbits'][0]
+                    clbit = operation.clbits[0]
                     Measure | qubit
                     bit = 1 << clbit
                     self._classical_state = (
                         self._classical_state & (~bit)) | (int(qubit)
                                                            << clbit)
                 # Check if reset
-                elif operation['name'] == 'reset':
-                    qubit = operation['qubits'][0]
+                elif operation.name == 'reset':
+                    qubit = operation.qubits[0]
                     raise SimulatorError('Reset operation not yet implemented '
                                          'for ProjectQ C++ backend')
                 # Check if snapshot
-                elif operation['name'] == 'snapshot':
+                elif operation.name == 'snapshot':
                     eng.flush()
-                    location = str(operation['params'][0])
+                    location = str(operation.params[0])
                     statevector = np.array(eng.backend.cheat()[1])
                     if location in snapshots:
                         snapshots[location]['statevector'].append(statevector)
                     else:
                         snapshots[location] = {'statevector': [statevector]}
-                elif operation['name'] == 'barrier':
+                elif operation.name == 'barrier':
                     pass
                 else:
-                    backend = self._configuration['name']
+                    backend = self.name
                     err_msg = '{0} encountered unrecognized operation "{1}"'
                     raise SimulatorError(err_msg.format(backend,
-                                                        operation['name']))
+                                                        operation.name))
 
             # Before the program terminates, all the qubits must be measured,
             # including those that have not been measured by the circuit.
@@ -294,7 +290,7 @@ class QasmSimulatorProjectQ(BaseBackend):
         if self._shots == 1:
             data['classical_state'] = self._classical_state
         end = time.time()
-        return {'name': circuit['name'],
+        return {'name': circuit.header.name,
                 'seed': self._seed,
                 'shots': self._shots,
                 'data': data,
@@ -303,18 +299,18 @@ class QasmSimulatorProjectQ(BaseBackend):
                 'time_taken': (end-start)}
 
     def _validate(self, qobj):
-        if qobj['config']['shots'] == 1:
+        if qobj.config.shots == 1:
             warnings.warn('The behavior of getting statevector from simulators '
                           'by setting shots=1 is deprecated and has been removed '
                           'for this simulator. '
                           'Use the local_statevector_simulator instead, or place '
                           'explicit snapshot instructions.',
                           DeprecationWarning)
-        for circ in qobj['circuits']:
-            if 'measure' not in [op['name'] for
-                                 op in circ['compiled_circuit']['operations']]:
+        for circ in qobj.experiments:
+            if 'measure' not in [op.name for op in circ.instructions]:
                 logger.warning("no measurements in circuit '%s', "
-                               "classical register will remain all zeros.", circ['name'])
+                               "classical register will remain all zeros.",
+                               circ.header.name)
         return
 
 

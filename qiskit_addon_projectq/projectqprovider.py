@@ -20,8 +20,8 @@ class ProjectQProvider(BaseProvider):
         # Populate the list of local ProjectQ backends.
         statevector_simulator = StatevectorSimulatorProjectQ()
         qasm_simulator = QasmSimulatorProjectQ()
-        self.backends = {statevector_simulator.name: statevector_simulator,
-                         qasm_simulator.name: qasm_simulator}
+        self.backends = {statevector_simulator.name(): statevector_simulator,
+                         qasm_simulator.name(): qasm_simulator}
 
     def get_backend(self, name):
         return self.backends[name]
