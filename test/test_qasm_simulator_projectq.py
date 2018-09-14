@@ -18,7 +18,7 @@ from scipy.stats import chi2_contingency
 
 from qiskit import (QuantumCircuit, QuantumRegister,
                     ClassicalRegister, register, execute)
-from qiskit_addon_projectq import ProjectQProvider
+from qiskit.backends.projectq import ProjectQProvider
 
 
 class TestQasmSimulatorProjectQ(QiskitProjectQTestCase):

@@ -8,7 +8,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="qiskit_addon_projectq",
+    name="qiskit-addon-projectq",
     version="0.1.0",
     author="Qiskit Development Team",
     author_email="qiskit@us.ibm.com",
@@ -28,9 +28,9 @@ setup(
         "Programming Language :: Python :: 3.6",
         "Topic :: Scientific/Engineering",
     ],
-    install_requires=['qiskit>=0.5.5', 'projectq>=0.3.6'],
+    install_requires=['qiskit>=0.6,<0.7', 'projectq>=0.3.6'],
     keywords="qiskit quantum projectq simulator",
-    packages=find_packages(exclude=['test*']),
+    packages=['qiskit.backends.projectq'],
     include_package_data=True,
     python_requires=">=3.5"
 )

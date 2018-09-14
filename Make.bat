@@ -24,7 +24,7 @@ ECHO.
 GOTO :end
 
 :lint
-pylint -rn qiskit_addon_projectq test
+pylint -rn qiskit\backends\projectq test
 IF errorlevel 9009 GOTO :error
 GOTO :next
 

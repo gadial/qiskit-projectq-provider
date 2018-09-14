@@ -6,10 +6,10 @@
 
 # Ignoring generated ones with .py extension.
 lint:
-	pylint -rn qiskit_addon_projectq test
+	pylint -rn qiskit/backends/projectq test
 
 style:
-	pycodestyle --max-line-length=100 qiskit_addon_projectq test
+	pycodestyle --max-line-length=100 qiskit test
 
 # Use the -s (starting directory) flag for "unittest discover" is necessary,
 # otherwise the QuantumCircuit header will be modified during the discovery.

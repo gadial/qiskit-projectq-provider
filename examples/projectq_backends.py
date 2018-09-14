@@ -9,8 +9,8 @@ Example use of the ProjectQ based simulators
 """
 
 import os
-from qiskit_addon_projectq import ProjectQProvider
 from qiskit import execute, load_qasm_file, register
+from qiskit.backends.projectq import ProjectQProvider
 
 
 def use_projectq_backends():

@@ -11,7 +11,7 @@ from test.common import QiskitProjectQTestCase
 
 import unittest
 from qiskit import execute, load_qasm_file, register
-from qiskit_addon_projectq import ProjectQProvider
+from qiskit.backends.projectq import ProjectQProvider
 
 
 class StatevectorSimulatorProjectQTest(QiskitProjectQTestCase):

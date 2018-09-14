@@ -14,7 +14,7 @@ import logging
 from qiskit.backends.local._simulatorerror import SimulatorError
 from qiskit.backends.local.localjob import LocalJob
 from qiskit.qobj import QobjItem, QobjInstruction
-from qiskit_addon_projectq import QasmSimulatorProjectQ
+from qiskit.backends.projectq import QasmSimulatorProjectQ
 
 logger = logging.getLogger(__name__)
 
